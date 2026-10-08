@@ -3,6 +3,10 @@
 #include <string>	//need to get input from CAN
 #include <cstdint>	//need to convert from string to exadecimal ecc...
 #include <cctype>	//need to controll if inputs are exadecimal
+#include <queue>	//atp gonna add bunch of libraries
+#include <mutex>	//ahaha i LOVE libraries
+#include <thread>	//i want threads
+#include <athomic>	//i... am... athomic...
 
 extern "C"{
 	#include "fake_receiver.h"
@@ -21,18 +25,60 @@ enum class State{
 	Before					//extra state i added bc the machine still has to start its process
 };
 
-int main(void){
+//creation of the queue as a separate thread
+struct ReceivedMsg {
+	std::string data;
+};
 
-	//initials variables
-	State state = State::Before;
+//creation of global queue and variables
+std::queue<ReceivedMsg> msgQueue;
+std::mutex mutexQueue;
+std::atomic<bool> stop_rec = false;
+
+//thread receiver
+void receiver(){
 	char message [MAX_CAN_MESSAGE_SIZE];
-	open_can("../candump.log");		//i guess i messed up so i had to add ../
-	while (true) {
+	while (!stop_rec){				//so if stop_rec = true then rec must be stopped
 		int msg_len = can_receive(message);	//i need the str lenght so yeah
-		if (msg_len == -1) {		//fake_reciever.h specifies it gives -1 if error
+		if (msg_len == -1) {			//fake_reciever.h specifies it gives -1 if error
 			break;
 		}
-		std::string rec(message, msg_len);	//rec stands for received or more like rec as recording or recorded
+		struct ReceivedMsg rec;			//rec stands for received or more like rec as recording or recorded
+		rec.data = std::string(message, msg_len);
+		{
+		std::lock_guard<std::mutex> lock(mutexQueue);
+		msgQueue.push(rec);
+		}
+	}
+}
+
+int main(void){
+
+	//preparations
+	State state = State::Before;
+	open_can("../candump.log");			//i guess i messed up so i had to add ../
+	std::thread recThread(receiver);
+
+	//body of main
+	while (true) {
+		if (/*non so che cazzo scrivere ci devo pensare*/) {
+			break;
+		}
+		struct ReceivedMsg r_msg;
+		bool is_msg_full = false;
+		{					//this is in a block because of mutex that i don't want that variable in future things
+			std::lock_guard<std::mutex> lock(mutexQueue);
+			if(!msgQueue.empty()){
+				r_msg = msgQueue.front();	//attaboy we have the massage
+				msgQueue.pop();		//and we pop to get the next msg
+				is_msg_full = true;
+			}
+		}
+
+		if (!is_msg_full) {
+			continue;
+		}
+		std::string rec = r_msg.data;		//and we are soo back
 		size_t divisor = rec.find('#');		//need to separate id and payload
 		std::string str_id = rec.substr(0, divisor);
 		std::string str_payload = rec.substr(divisor + 1);
@@ -67,7 +113,6 @@ int main(void){
 		//conversion and parsing
 		struct CanMessage msg;
 		msg.id = std::stoul(str_id, nullptr, 16);
-		msg.payload[8];
 		msg.pay_len = str_payload.length() / 2;	//exadecimal so if i have lenght = n then the number of byte used is n/2
 
 		for(int i = 0; i < msg.pay_len; i += 1){	//assing an array with the numbers in exadecimal base, why an array? idk wanted to track numbers
@@ -103,6 +148,7 @@ int main(void){
 		}
 	}
 
+	recThread.join();
 	close_can();
 
 	return 0;
@@ -130,3 +176,11 @@ int main(void){
 	*/
 
 	//std::cout << std::hex << msg.id << static_cast<int>(msg.payload[0]) << std::endl;     control of the ouput
+
+	/*						//early version of the reciever in main, take if needed
+	int msg_len = can_receive(message);
+	if (msg_len == -1) {
+		break;
+	}
+	std::string rec(message, msg_len);
+	*/

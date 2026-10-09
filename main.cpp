@@ -1,4 +1,4 @@
-#include <stdio.h>
+  #include <stdio.h>
 #include <iostream>
 #include <string>	//need to get input from CAN
 #include <cstdint>	//need to convert from string to exadecimal ecc...
@@ -6,7 +6,8 @@
 #include <queue>	//atp gonna add bunch of libraries
 #include <mutex>	//ahaha i LOVE libraries
 #include <thread>	//i want threads
-#include <athomic>	//i... am... athomic...
+#include <atomic>	//i... am... athomic... (yeah in v0.5 there was a h)
+#include <condition_variable> //need comunications from threads
 
 extern "C"{
 	#include "fake_receiver.h"
@@ -34,6 +35,9 @@ struct ReceivedMsg {
 std::queue<ReceivedMsg> msgQueue;
 std::mutex mutexQueue;
 std::atomic<bool> stop_rec = false;
+std::atomic<bool> rec_fin = false;
+std::condition_variable main_con;
+
 
 //thread receiver
 void receiver(){
@@ -41,6 +45,8 @@ void receiver(){
 	while (!stop_rec){				//so if stop_rec = true then rec must be stopped
 		int msg_len = can_receive(message);	//i need the str lenght so yeah
 		if (msg_len == -1) {			//fake_reciever.h specifies it gives -1 if error
+			rec_fin = true;
+			main_con.notify_one();
 			break;
 		}
 		struct ReceivedMsg rec;			//rec stands for received or more like rec as recording or recorded
@@ -49,6 +55,7 @@ void receiver(){
 		std::lock_guard<std::mutex> lock(mutexQueue);
 		msgQueue.push(rec);
 		}
+		main_con.notify_one();
 	}
 }
 
@@ -61,18 +68,19 @@ int main(void){
 
 	//body of main
 	while (true) {
-		if (/*non so che cazzo scrivere ci devo pensare*/) {
-			break;
-		}
 		struct ReceivedMsg r_msg;
 		bool is_msg_full = false;
 		{					//this is in a block because of mutex that i don't want that variable in future things
-			std::lock_guard<std::mutex> lock(mutexQueue);
-			if(!msgQueue.empty()){
-				r_msg = msgQueue.front();	//attaboy we have the massage
-				msgQueue.pop();		//and we pop to get the next msg
-				is_msg_full = true;
+			std::unique_lock<std::mutex> lock(mutexQueue);
+			main_con.wait(lock, [] {
+				return !msgQueue.empty() || rec_fin;
+			});
+			if(msgQueue.empty() && rec_fin){
+				break;
 			}
+			r_msg = msgQueue.front();	//attaboy we have the massage
+			msgQueue.pop();		//and we pop to get the next msg
+			is_msg_full = true;
 		}
 
 		if (!is_msg_full) {

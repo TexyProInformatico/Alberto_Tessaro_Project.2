@@ -1,4 +1,4 @@
-  #include <stdio.h>
+#include <stdio.h>
 #include <iostream>
 #include <string>	//need to get input from CAN
 #include <cstdint>	//need to convert from string to exadecimal ecc...
@@ -128,6 +128,21 @@ int main(void){
 			msg.payload[i] = std::stoul(byte_of_payload, nullptr, 16);
 		}
 
+		//FSM
+		if (msg.id == 0x0A0 && msg.pay_len == 2) {
+			bool isStart = (msg.payload[0] == 0x66 && msg.payload[1] == 0x01) ||
+	   	   		       (msg.payload[0] == 0xFF && msg.payload[1] == 0x01);
+			bool isStop = msg.payload[0] == 0x66 && msg.payload[1] == 0xFF;
+			if (isStart && state != State::Run) {	//We start to run after a stop or if its the first run of the cycle (before state)
+				state = State::Run;
+				std::cout << "START" << std::endl;
+			}
+			else if(isStop && state == State::Run) {	//wants to stop only if i run
+				state = State::Idle;
+				std::cout << "STOP" << std::endl;
+			}
+		}
+
 		//stampa di id e payload
 		std::cout << "ID: " << std::hex << msg.id << " | Payload: ";
 
@@ -136,24 +151,7 @@ int main(void){
 		}
 		std::cout << std::endl;
 
-		//control for start of the sfm
-		if (state == State::Idle || state == State::Before){
-			if(msg.id == 0x0A0 && msg.pay_len == 2){	//check the id and the payload for start of the fsm
-				if((msg.payload[0] == 0x66 && msg.payload[1] == 0x01) ||
-		   	   	   (msg.payload[0] == 0xFF && msg.payload[1] == 0x01)){
-					state = State::Run;
-					std::cout << "start" << std::endl;
-				}
-			}
-		}
-		if (state == State::Run || state == State::Before){
-			if(msg.id == 0x0A0 && msg.pay_len == 2){
-				if(msg.payload[0] == 0x66 && msg.payload[1] == 0xFF){
-					state = State::Idle;
-					std::cout << "idle" << std::endl;
-				}
-			}
-		}
+
 	}
 
 	recThread.join();
@@ -191,4 +189,24 @@ int main(void){
 		break;
 	}
 	std::string rec(message, msg_len);
+	*/
+
+	/*						//eary fsm
+	if (state == State::Idle || state == State::Before){
+		if(msg.id == 0x0A0 && msg.pay_len == 2){	//check the id and the payload for start of the fsm
+			if((msg.payload[0] == 0x66 && msg.payload[1] == 0x01) ||
+	   	   	   (msg.payload[0] == 0xFF && msg.payload[1] == 0x01)){
+				state = State::Run;
+				std::cout << "start" << std::endl;
+			}
+		}
+	}
+	if (state == State::Run || state == State::Before){
+		if(msg.id == 0x0A0 && msg.pay_len == 2){
+			if(msg.payload[0] == 0x66 && msg.payload[1] == 0xFF){
+				state = State::Idle;
+				std::cout << "idle" << std::endl;
+			}
+		}
+	}
 	*/

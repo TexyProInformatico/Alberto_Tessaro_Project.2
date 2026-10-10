@@ -77,6 +77,24 @@ void receiver(){
 	}
 }
 
+//save statistics
+void saveStatistics (const std::string& filename) {
+	std::ofstream csv(filename);
+	if (!csv.is_open()) {
+		std::cerr << "Error idk why but csv is not open" << std::endl;
+		return;
+	}
+	csv << "ID , number_of_messages , mean_time\n";
+	for (const auto& [id, stat] : statistics) {
+		double mean = 0.0;
+		if (stat.num_of_intervals > 0) {
+			mean = stat.tot_time_ms / stat.num_of_intervals;
+		}
+		csv << std::hex << id << std::dec << " , "
+		    << stat.num_of_msg << " , " << mean << '\n';
+	}
+}
+
 int main(void){
 
 	//preparations
@@ -189,6 +207,7 @@ int main(void){
 				if (logFile.is_open()) {
 					logFile.close();
 				}
+				saveStatistics("statistics.cvs");
 				std::cout << "STOP" << std::endl;
 			}
 		}

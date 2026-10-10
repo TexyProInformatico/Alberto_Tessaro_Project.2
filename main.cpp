@@ -8,6 +8,12 @@
 #include <thread>	//i want threads
 #include <atomic>	//i... am... athomic... (yeah in v0.5 there was a h)
 #include <condition_variable> //need comunications from threads
+#include <fstream>	//use for logging and csv file
+#include <chrono>	//need time
+#include <iomanip>
+#include <sstream>
+#include <unordered_map>
+#include <cstdint>
 
 extern "C"{
 	#include "fake_receiver.h"
@@ -29,6 +35,16 @@ enum class State{
 //creation of the queue as a separate thread
 struct ReceivedMsg {
 	std::string data;
+	std::chrono::system_clock::time_point timestamp;
+	std::chrono::steady_clock::time_point elapsted_timestamp; 	//yeah i'm not gonna abbreviate that otherwise i'll forget what it means
+};
+
+//creation of the struct containing all the time stats of each id
+struct Stats{
+	unsigned int num_of_msg = 0;
+	double tot_time_ms = 0.0;
+	unsigned int num_of_intervals = 0;
+	std::chrono::steady_clock::time_point last_timestamp;
 };
 
 //creation of global queue and variables
@@ -37,7 +53,7 @@ std::mutex mutexQueue;
 std::atomic<bool> stop_rec = false;
 std::atomic<bool> rec_fin = false;
 std::condition_variable main_con;
-
+std::unordered_map<uint16_t, Stats> statistics;
 
 //thread receiver
 void receiver(){
@@ -51,6 +67,8 @@ void receiver(){
 		}
 		struct ReceivedMsg rec;			//rec stands for received or more like rec as recording or recorded
 		rec.data = std::string(message, msg_len);
+		rec.timestamp = std::chrono::system_clock::now();
+		rec.elapsted_timestamp = std::chrono::steady_clock::now();
 		{
 		std::lock_guard<std::mutex> lock(mutexQueue);
 		msgQueue.push(rec);
@@ -65,6 +83,8 @@ int main(void){
 	State state = State::Before;
 	open_can("../candump.log");			//i guess i messed up so i had to add ../
 	std::thread recThread(receiver);
+	std::ofstream logFile;
+	int ses_num = 0;				//aha ses
 
 	//body of main
 	while (true) {
@@ -86,10 +106,23 @@ int main(void){
 		if (!is_msg_full) {
 			continue;
 		}
+
+		//initialazing data of message
 		std::string rec = r_msg.data;		//and we are soo back
 		size_t divisor = rec.find('#');		//need to separate id and payload
 		std::string str_id = rec.substr(0, divisor);
 		std::string str_payload = rec.substr(divisor + 1);
+
+		//initialazing timestamp of message
+		auto time = std::chrono::system_clock::to_time_t(r_msg.timestamp);
+		auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+			  r_msg.timestamp.time_since_epoch()).count() % 1000;
+		std::ostringstream timestamp;
+		timestamp << std::put_time(std::localtime(&time),  "%d-%m-%Y %H:%M:%S")
+			  << "." << std::setfill('0') << std::setw(3) << ms;
+
+		//initialazing elapsed timesss
+		auto rec_time = r_msg.elapsted_timestamp;
 
 		//control of the input
 		if (str_id.length() != 3){		//id must be 3 digits
@@ -128,6 +161,17 @@ int main(void){
 			msg.payload[i] = std::stoul(byte_of_payload, nullptr, 16);
 		}
 
+		//calc of statistics
+		Stats& stat = statistics[msg.id];
+		if (stat.num_of_msg > 0) {
+			double interval = std::chrono::duration<double, std::milli>(
+					  rec_time - stat.last_timestamp).count();
+			stat.tot_time_ms += interval;
+			stat.num_of_intervals += 1;
+		}
+		stat.last_timestamp = rec_time;
+		stat.num_of_msg += 1;
+
 		//FSM
 		if (msg.id == 0x0A0 && msg.pay_len == 2) {
 			bool isStart = (msg.payload[0] == 0x66 && msg.payload[1] == 0x01) ||
@@ -135,23 +179,24 @@ int main(void){
 			bool isStop = msg.payload[0] == 0x66 && msg.payload[1] == 0xFF;
 			if (isStart && state != State::Run) {	//We start to run after a stop or if its the first run of the cycle (before state)
 				state = State::Run;
+				ses_num += 1;
+				std::string filename = "tel_session_" + std::to_string(ses_num) + ".log";
+				logFile.open(filename);
 				std::cout << "START" << std::endl;
 			}
 			else if(isStop && state == State::Run) {	//wants to stop only if i run
 				state = State::Idle;
+				if (logFile.is_open()) {
+					logFile.close();
+				}
 				std::cout << "STOP" << std::endl;
 			}
 		}
 
-		//stampa di id e payload
-		std::cout << "ID: " << std::hex << msg.id << " | Payload: ";
-
-		for (int i = 0; i < msg.pay_len; i+= 1) {
-			std::cout << std::hex << static_cast<int>(msg.payload[i]) << " ";
+		//logging
+		if (state == State::Run && logFile.is_open()) {
+			logFile << timestamp.str() << " | " << rec << '\n';
 		}
-		std::cout << std::endl;
-
-
 	}
 
 	recThread.join();
@@ -210,3 +255,13 @@ int main(void){
 		}
 	}
 	*/
+
+	/*	//stampa di id e payload
+	std::cout << "ID: " << std::hex << msg.id << " | Payload: ";
+
+	for (int i = 0; i < msg.pay_len; i+= 1) {
+		std::cout << std::hex << static_cast<int>(msg.payload[i]) << " ";
+	}
+	std::cout << std::endl;
+	*/
+
